@@ -1,7 +1,11 @@
 package Product;
 
+import Utilities.Constants;
 import Utilities.DFInteraction;
+import jade.core.AID;
 import jade.core.Agent;
+import jade.core.behaviours.OneShotBehaviour;
+import jade.core.behaviours.SequentialBehaviour;
 import jade.core.behaviours.SimpleBehaviour;
 import jade.domain.FIPAAgentManagement.DFAgentDescription;
 import jade.domain.FIPAException;
@@ -9,6 +13,7 @@ import jade.lang.acl.ACLMessage;
 import jade.proto.AchieveREInitiator;
 import jade.proto.ContractNetInitiator;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.Vector;
 
 /**
@@ -16,11 +21,14 @@ import java.util.Vector;
  * @author Ricardo Silva Peres <ricardo.peres@uninova.pt>
  */
 public class ProductAgent extends Agent {
+
     String id;
     ArrayList<String> executionPlan = new ArrayList<>();
     // TO DO: Add remaining attributes required for your implementation
-    ACLMessage bestResource = null;
-    boolean resourceReady = false, locationReached = false, skillDone = false;
+    int step;
+    String location, nextLocation;
+    AID bestResource;
+    boolean negotiationDone, transportRequired, transportDone, skillDone;
 
     @Override
     protected void setup() {
@@ -29,7 +37,23 @@ public class ProductAgent extends Agent {
         this.executionPlan = this.getExecutionList((String) args[1]);
         System.out.println("*** LOG: " + this.id + " requires: " + executionPlan);
 
-        this.addBehaviour(new executePlanStep(this));
+        this.step = 0;
+        this.location = "Source";
+
+        this.negotiationDone = false;
+        this.transportRequired = false;
+        this.transportDone = false;
+        this.skillDone = false;
+
+        SequentialBehaviour sb = new SequentialBehaviour();
+        for (int i = 0; i < executionPlan.size(); i++) {
+            sb.addSubBehaviour(new SearchResources(this));
+            sb.addSubBehaviour(new TransportToResource(this));
+            sb.addSubBehaviour(new ExecuteSkill(this));
+            sb.addSubBehaviour(new Finish(this));
+        }
+
+        this.addBehaviour(sb);
     }
 
     @Override
@@ -49,169 +73,264 @@ public class ProductAgent extends Agent {
         return null;
     }
 
-    // *************************** FIPA REQUEST ********************************
-    
-    private class REInitiator extends AchieveREInitiator {
-        public REInitiator(Agent a, ACLMessage msg) {
+    // *********************** FIPA REQUEST TRANSPORT **************************
+    private class REInitiatorTransport extends AchieveREInitiator {
+
+        public REInitiatorTransport(Agent a, ACLMessage msg) {
             super(a, msg);
         }
 
         @Override
         protected void handleAgree(ACLMessage agree) {
-            System.out.println("*** LOG: " + myAgent.getLocalName() + "received AGREE from " + agree.getSender().getLocalName());
+            System.out.println("*** LOG: " + myAgent.getLocalName() + " received AGREE from " + agree.getSender().getLocalName());
         }
 
         @Override
         protected void handleInform(ACLMessage inform) {
             System.out.println("*** LOG: " + myAgent.getLocalName() + " received INFORM from " + inform.getSender().getLocalName());
-            if (!locationReached)
-                locationReached = true;
-            else
-                skillDone = true;
+
+            location = nextLocation;
+            transportDone = true;
         }
     }
-    
-    // ************************ FIPA CONTRACTNET *******************************
 
+    // *********************** FIPA REQUEST RESOURCE ***************************
+    private class REInitiatorResource extends AchieveREInitiator {
+
+        public REInitiatorResource(Agent a, ACLMessage msg) {
+            super(a, msg);
+        }
+
+        @Override
+        protected void handleAgree(ACLMessage agree) {
+            System.out.println("*** LOG: " + myAgent.getLocalName() + " received AGREE from " + agree.getSender().getLocalName());
+        }
+
+        @Override
+        protected void handleInform(ACLMessage inform) {
+            System.out.println("*** LOG: " + myAgent.getLocalName() + " received INFORM from " + inform.getSender().getLocalName());
+
+            skillDone = true;
+        }
+    }
+
+    // ************************ FIPA CONTRACTNET *******************************
     private class CNInitiator extends ContractNetInitiator {
+
         public CNInitiator(Agent a, ACLMessage msg) {
             super(a, msg);
         }
 
         @Override
         protected void handleAllResponses(Vector responses, Vector acceptances) {
-            ACLMessage bestPropose = (ACLMessage) responses.get(0);
+            double bestProposal = -1;
+            AID bestProposer = null;
+            ACLMessage accept = null;
+
             for (Object response : responses) {
                 ACLMessage propose = (ACLMessage) response;
                 if (propose.getPerformative() == ACLMessage.PROPOSE) {
                     System.out.println("*** LOG: " + myAgent.getLocalName() + " received PROPOSE from " + propose.getSender().getLocalName() + " with content = " + propose.getContent());
-                    if (Integer.parseInt(propose.getContent()) < Integer.parseInt(bestPropose.getContent())) {
-                        bestPropose = (ACLMessage) response;
+
+                    ACLMessage reply = propose.createReply();
+                    reply.setPerformative(ACLMessage.REJECT_PROPOSAL);
+                    acceptances.add(reply);
+                    
+                    double proposal = Double.parseDouble(propose.getContent());
+                    if (proposal > bestProposal) {
+                        bestProposal = proposal;
+                        bestProposer = propose.getSender();
+                        accept = reply;
                     }
                 } else {
                     System.out.println("*** LOG: " + myAgent.getLocalName() + " received REFUSE from " + propose.getSender().getLocalName());
                 }
             }
             
-            bestResource = bestPropose;
-            ACLMessage accept = bestPropose.createReply();
-            accept.setPerformative(ACLMessage.ACCEPT_PROPOSAL);
-            acceptances.add(accept);
-            System.out.println("*** LOG: " + myAgent.getLocalName() + " sent ACCEPT-PROPOSAL to " + bestPropose.getSender().getLocalName());
+            if (accept != null) {
+                accept.setPerformative(ACLMessage.ACCEPT_PROPOSAL);
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " sent ACCEPT-PROPOSAL to " + bestProposer.getLocalName());
+
+                bestResource = bestProposer;
+            } else {
+                ACLMessage cfp = new ACLMessage(ACLMessage.CFP);
+                for (Object response : responses) {
+                    ACLMessage retry = (ACLMessage) response;
+                    cfp.addReceiver(retry.getSender());
+                    System.out.println("*** LOG: " + myAgent.getLocalName() + " sent CFP to " + retry.getSender().getLocalName());
+                    
+                    myAgent.addBehaviour(new CNInitiator(myAgent, cfp));
+                }
+            }
         }
 
         @Override
         protected void handleInform(ACLMessage inform) {
-            System.out.println("*** LOG: " + myAgent.getLocalName() + " received INFORM from " + inform.getSender().getLocalName());
-            resourceReady = true;
+            System.out.println("*** LOG: " + myAgent.getLocalName() + " received INFORM from " + inform.getSender().getLocalName() + " with content = " + inform.getContent());
+
+            nextLocation = inform.getContent();
+            if (location.equals(nextLocation)) {
+                transportRequired = false;
+            } else {
+                transportRequired = true;
+            }
+
+            negotiationDone = true;
         }
     }
-    
-    // ****************************** BEHAVIOUR ********************************
 
-    private class executePlanStep extends SimpleBehaviour {
-        public int step;
-        private boolean finished;
+    // ************************* SEARCH RESOURCES ******************************
+    private class SearchResources extends OneShotBehaviour {
 
-        public executePlanStep(Agent a) {
+        public SearchResources(Agent a) {
             super(a);
-            this.step = 0;
-            this.finished = false;
         }
 
         @Override
         public void action() {
             DFAgentDescription[] resourceAgents = null;
-            System.out.println("*** LOG: " + myAgent.getLocalName() + " looking for agents that can " + executionPlan.get(step));
             try {
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " searching DF for agent that can execute " + executionPlan.get(step));
                 resourceAgents = DFInteraction.SearchInDFByName(executionPlan.get(step), myAgent);
             } catch (FIPAException e) {
-                System.out.println("*** ERROR: " + myAgent.getLocalName() + " got and error searching for agent that can " + executionPlan.get(step));
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " threw FIPAException searching DF for agents that " + executionPlan.get(step));
             }
-            
+
             if (resourceAgents != null) {
                 System.out.println("*** LOG: " + myAgent.getLocalName() + " found " + resourceAgents.length + " agents that can " + executionPlan.get(step));
-                
+
                 ACLMessage cfp = new ACLMessage(ACLMessage.CFP);
                 for (DFAgentDescription agent : resourceAgents) {
                     cfp.addReceiver(agent.getName());
                     System.out.println("*** LOG: " + myAgent.getLocalName() + " sent CFP to " + agent.getName().getLocalName());
                 }
+
                 myAgent.addBehaviour(new CNInitiator(myAgent, cfp));
-                
-                while (!resourceReady) {
-                    try {
-                        System.out.println("*** LOG: " + myAgent.getLocalName() + " waiting for INFORM");
-                        Thread.sleep(1000);
-                    } catch (InterruptedException e) {
-                        System.out.println("*** ERROR: " + myAgent.getLocalName() + " got an error while waiting for the resource to be ready");
-                    }
-                }
-                
-                DFAgentDescription[] transportAgent = null;
-                System.out.println("*** LOG: " + myAgent.getLocalName() + " looking for a transport agent");
-                try {
-                    transportAgent = DFInteraction.SearchInDFByName("sk_move", myAgent);
-                } catch (FIPAException e) {
-                    System.out.println("*** ERROR: " + myAgent.getLocalName() + " got and error searching for a transport agent");
-                }
-                
-                if (transportAgent != null) {
-                    System.out.println("*** LOG: " + myAgent.getLocalName() + " found a transport agent");
-                    
-                    ACLMessage request = new ACLMessage(ACLMessage.REQUEST);
-                    request.addReceiver(transportAgent[0].getName());
-                    myAgent.addBehaviour(new REInitiator(myAgent, request));
-                    
-                    while (!locationReached) {
-                        try {
-                            Thread.sleep(1000);
-                        } catch (InterruptedException e) {
-                            System.out.println("*** ERROR: " + myAgent.getLocalName() + " got an error while waiting for transport agent to reach location");
-                        }
-                    }
-                    
-                    request = new ACLMessage(ACLMessage.REQUEST);
-                    request.addReceiver(bestResource.getSender());
-                    myAgent.addBehaviour(new REInitiator(myAgent, request));
-                    
-                    while (!skillDone) {
-                        try {
-                            Thread.sleep(1000);
-                        } catch (InterruptedException e) {
-                            System.out.println("*** ERROR: " + myAgent.getLocalName() + " got an error while waiting for skill to be applied");
-                        }
-                    }
-                    
-                    bestResource = null;
-                    resourceReady = false;
-                    locationReached = false;
-                    skillDone = false;
-                    
-                    if (step++ == executionPlan.size())
-                        finished = true;
-                    
-                } else {
-                    System.out.println("*** LOG: " + myAgent.getLocalName() + " didn't find any transport agent");
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException e) {
-                        System.out.println("*** ERROR: " + myAgent.getLocalName() + " got an error while waiting for new transport agent search");
-                    }
-                } 
             } else {
-                System.out.println("*** LOG: " + myAgent.getLocalName() + " didn't find any agents that can " + executionPlan.get(step));
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    System.out.println("*** ERROR: " + myAgent.getLocalName() + " got an error while waiting for new agent search");
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " couldn't find an agent that can " + executionPlan.get(step));
+            }
+        }
+    }
+
+    // ************************* SEARCH TRANSPORT ******************************
+    private class SearchTransport extends OneShotBehaviour {
+
+        public SearchTransport(Agent a) {
+            super(a);
+        }
+
+        @Override
+        public void action() {
+            DFAgentDescription[] transportAgents = null;
+            try {
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " searching DF for transport agents");
+                transportAgents = DFInteraction.SearchInDFByName("sk_move", myAgent);
+            } catch (FIPAException e) {
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " threw FIPAException searching DF for transport agents");
+            }
+
+            if (transportAgents != null) {
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " found " + transportAgents.length + " transport agents");
+
+                ACLMessage request = new ACLMessage(ACLMessage.REQUEST);
+                request.setContent(location + Constants.TOKEN + nextLocation);
+                request.addReceiver(transportAgents[0].getName());
+
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " sent REQUEST to " + transportAgents[0].getName().getLocalName());
+
+                myAgent.addBehaviour(new REInitiatorTransport(myAgent, request));
+            } else {
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " coudln't find transport agents");
+            }
+        }
+    }
+
+    // ************************* WAIT NEGOTIATION ******************************
+    private class TransportToResource extends SimpleBehaviour {
+
+        private boolean finished;
+
+        public TransportToResource(Agent a) {
+            super(a);
+            this.finished = false;
+        }
+
+        @Override
+        public void action() {
+            if (negotiationDone) {
+                if (transportRequired) {
+                    myAgent.addBehaviour(new SearchTransport(myAgent));
+
+                    transportRequired = false;
+                } else {
+                    transportDone = true;
                 }
+
+                negotiationDone = false;
+                this.finished = true;
             }
         }
 
         @Override
         public boolean done() {
-            return finished;
+            return this.finished;
+        }
+    }
+
+    // ************************** WAIT TRANSPORT *******************************
+    private class ExecuteSkill extends SimpleBehaviour {
+
+        private boolean finished;
+
+        public ExecuteSkill(Agent a) {
+            super(a);
+            this.finished = false;
+        }
+
+        @Override
+        public void action() {
+            if (transportDone) {
+                ACLMessage request = new ACLMessage(ACLMessage.REQUEST);
+                request.setContent(executionPlan.get(step));
+                request.addReceiver(bestResource);
+                
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " sent REQUEST to " + bestResource.getLocalName());
+                myAgent.addBehaviour(new REInitiatorResource(myAgent, request));
+
+                transportDone = false;
+                this.finished = true;
+            }
+        }
+
+        @Override
+        public boolean done() {
+            return this.finished;
+        }
+    }
+
+    // **************************** WAIT SKILL *********************************
+    private class Finish extends SimpleBehaviour {
+
+        private boolean finished = false;
+
+        public Finish(Agent a) {
+            super(a);
+        }
+
+        @Override
+        public void action() {
+            if (skillDone) {
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " finished applying " + executionPlan.get(step) + "\n");
+
+                skillDone = false;
+                step++;
+                this.finished = true;
+            }
+        }
+
+        @Override
+        public boolean done() {
+            return this.finished;
         }
     }
 }

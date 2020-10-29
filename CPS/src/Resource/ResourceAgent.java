@@ -26,6 +26,8 @@ public class ResourceAgent extends Agent {
     String description;
     String[] associatedSkills;
     String location;
+    boolean available;
+    String skillToExecute;
 
     @Override
     protected void setup() {
@@ -45,6 +47,7 @@ public class ResourceAgent extends Agent {
         }
 
         this.location = (String) args[3];
+        this.available = true;
 
         myLib.init(this);
         this.associatedSkills = myLib.getSkills();
@@ -59,6 +62,7 @@ public class ResourceAgent extends Agent {
 
         // TO DO: Add responder behaviour/s
         this.addBehaviour(new CNResponder(this, MessageTemplate.MatchPerformative(ACLMessage.CFP)));
+        this.addBehaviour(new REResponder(this, MessageTemplate.MatchPerformative(ACLMessage.REQUEST)));
     }
 
     @Override
@@ -75,6 +79,9 @@ public class ResourceAgent extends Agent {
        @Override
        protected ACLMessage handleRequest(ACLMessage request) throws NotUnderstoodException, RefuseException {
            System.out.println("*** LOG: " + myAgent.getLocalName() + " received REQUEST from " + request.getSender().getLocalName());
+           
+           skillToExecute = request.getContent();
+           
            ACLMessage agree = request.createReply();
            agree.setPerformative(ACLMessage.AGREE);
            System.out.println("*** LOG: " + myAgent.getLocalName() + " sent AGREE to " + request.getSender().getLocalName());
@@ -83,10 +90,13 @@ public class ResourceAgent extends Agent {
        
        @Override
        protected ACLMessage prepareResultNotification(ACLMessage request, ACLMessage response) throws FailureException {
-           block(5000);
+           myLib.executeSkill(skillToExecute);
            ACLMessage inform = request.createReply();
            inform.setPerformative(ACLMessage.INFORM);
+           
+           available = true;
            System.out.println("*** LOG: " + myAgent.getLocalName() + " sent INFORM to " + request.getSender().getLocalName());
+           
            return inform;
        }
     }
@@ -102,26 +112,36 @@ public class ResourceAgent extends Agent {
         protected ACLMessage handleCfp(ACLMessage cfp) throws RefuseException, FailureException, NotUnderstoodException {
             System.out.println("*** LOG: " + myAgent.getLocalName() + " received CFP from " + cfp.getSender().getLocalName());
             
-            ACLMessage propose = cfp.createReply();
-            propose.setPerformative(ACLMessage.PROPOSE);
+            ACLMessage reply = cfp.createReply();
+            if (available) {
+                reply.setPerformative(ACLMessage.PROPOSE);
+                
+                double rand = Math.random();
+                reply.setContent("" + rand);
             
-            int rand = (int)(Math.random() * 10);
-            propose.setContent("" + rand);    // RANDOM INTEGER BETWEEN 0 AND 10
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " sent PROPOSE to " + cfp.getSender().getLocalName() + " with content = " + rand);
+            } else {
+                reply.setPerformative(ACLMessage.REFUSE);
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " sent REFUSE to " + cfp.getSender().getLocalName());
+            }
             
-            System.out.println("*** LOG: " + myAgent.getLocalName() + " sent PROPOSE to " + cfp.getSender().getLocalName() + " with content = " + rand);
-            return propose;
+            return reply;
         }
         
         @Override
         protected ACLMessage handleAcceptProposal(ACLMessage cfp, ACLMessage propose, ACLMessage accept) throws FailureException {
             System.out.println("*** LOG: " + myAgent.getLocalName() + " received ACCEPT-PROPOSAL from " + cfp.getSender().getLocalName());
-            block(3000);
             
             ACLMessage inform = cfp.createReply();
             inform.setPerformative(ACLMessage.INFORM);
+            inform.setContent(location);
+            
+            available = false;
             
             System.out.println("*** LOG: " + myAgent.getLocalName() + " sent INFORM to " + cfp.getSender().getLocalName());
             return inform;
         }
+        
+        
     }
 }

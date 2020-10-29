@@ -15,6 +15,7 @@ import jade.domain.FIPAException;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import jade.proto.AchieveREResponder;
+import java.util.StringTokenizer;
 
 /**
  *
@@ -26,6 +27,8 @@ public class TransportAgent extends Agent {
     ITransport myLib;
     String description;
     String[] associatedSkills;
+    String source, destination;
+    boolean available;
 
     @Override
     protected void setup() {
@@ -45,6 +48,10 @@ public class TransportAgent extends Agent {
             Logger.getLogger(TransportAgent.class.getName()).log(Level.SEVERE, null, ex);
         }
 
+        this.source = "Source";
+        this.destination = "Source";
+        this.available = true;
+
         myLib.init(this);
         this.associatedSkills = myLib.getSkills();
         System.out.println("Transport Deployed: " + this.id + " Executes: " + Arrays.toString(associatedSkills));
@@ -55,7 +62,7 @@ public class TransportAgent extends Agent {
         } catch (FIPAException e) {
             System.out.println("Error registering " + this.id + " in DF");
         }
-        
+
         // TO DO: Add responder behaviour/s
         this.addBehaviour(new REResponder(this, MessageTemplate.MatchPerformative(ACLMessage.REQUEST)));
     }
@@ -64,29 +71,45 @@ public class TransportAgent extends Agent {
     protected void takeDown() {
         super.takeDown();
     }
-    
+
     private class REResponder extends AchieveREResponder {
-       public REResponder(Agent a, MessageTemplate mt) {
-           super(a, mt);
-       } 
-       
-       @Override
-       protected ACLMessage handleRequest(ACLMessage request) throws NotUnderstoodException, RefuseException {
-           System.out.println("*** LOG: " + myAgent.getLocalName() + " received REQUEST from " + request.getSender().getLocalName());
-           ACLMessage agree = request.createReply();
-           agree.setPerformative(ACLMessage.AGREE);
-           System.out.println("*** LOG: " + myAgent.getLocalName() + " sent AGREE to " + request.getSender().getLocalName());
-           return agree;
-       }
-       
-       @Override
-       protected ACLMessage prepareResultNotification(ACLMessage request, ACLMessage response) throws FailureException {
-           myLib.executeMove("Nowhere", "Operator");
-           ACLMessage inform = request.createReply();
-           inform.setPerformative(ACLMessage.INFORM);
-           System.out.println("*** LOG: " + myAgent.getLocalName() + " sent INFORM to " + request.getSender().getLocalName());
-           return inform;
-       }
+
+        public REResponder(Agent a, MessageTemplate mt) {
+            super(a, mt);
+        }
+
+        @Override
+        protected ACLMessage handleRequest(ACLMessage request) throws NotUnderstoodException, RefuseException {
+            System.out.println("*** LOG: " + myAgent.getLocalName() + " received REQUEST from " + request.getSender().getLocalName());
+
+            ACLMessage reply = request.createReply();
+            if (available) {
+                StringTokenizer st = new StringTokenizer(request.getContent(), Constants.TOKEN);
+                source = st.nextToken();
+                destination = st.nextToken();
+                
+                available = false;
+                
+                reply.setPerformative(ACLMessage.AGREE);
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " sent AGREE to " + request.getSender().getLocalName());
+            } else {
+                reply.setPerformative(ACLMessage.REFUSE);
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " sent REFUSE to " + request.getSender().getLocalName());
+            }
+
+            return reply;
+        }
+
+        @Override
+        protected ACLMessage prepareResultNotification(ACLMessage request, ACLMessage response) throws FailureException {
+            myLib.executeMove(source, destination);
+            ACLMessage inform = request.createReply();
+            inform.setPerformative(ACLMessage.INFORM);
+            System.out.println("*** LOG: " + myAgent.getLocalName() + " sent INFORM to " + request.getSender().getLocalName());
+            available = true;
+            
+            return inform;
+        }
     }
-    
+
 }
