@@ -5,7 +5,6 @@ import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import Libraries.ITransport;
-import Resource.ResourceAgent;
 import Utilities.Constants;
 import Utilities.DFInteraction;
 import jade.domain.FIPAAgentManagement.FailureException;
@@ -48,8 +47,6 @@ public class TransportAgent extends Agent {
             Logger.getLogger(TransportAgent.class.getName()).log(Level.SEVERE, null, ex);
         }
 
-        this.source = "Source";
-        this.destination = "Source";
         this.available = true;
 
         myLib.init(this);
@@ -102,7 +99,7 @@ public class TransportAgent extends Agent {
 
         @Override
         protected ACLMessage prepareResultNotification(ACLMessage request, ACLMessage response) throws FailureException {
-            myLib.executeMove(source, destination);
+            myLib.executeMove(source, destination, id);
             ACLMessage inform = request.createReply();
             inform.setPerformative(ACLMessage.INFORM);
             System.out.println("*** LOG: " + myAgent.getLocalName() + " sent INFORM to " + request.getSender().getLocalName());

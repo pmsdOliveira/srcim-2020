@@ -13,8 +13,9 @@ import jade.lang.acl.ACLMessage;
 import jade.proto.AchieveREInitiator;
 import jade.proto.ContractNetInitiator;
 import java.util.ArrayList;
-import java.util.Enumeration;
 import java.util.Vector;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  *
@@ -27,7 +28,7 @@ public class ProductAgent extends Agent {
     // TO DO: Add remaining attributes required for your implementation
     int step;
     String location, nextLocation;
-    AID bestResource;
+    AID bestResource, transport;
     boolean negotiationDone, transportRequired, transportDone, skillDone;
 
     @Override
@@ -83,6 +84,19 @@ public class ProductAgent extends Agent {
         @Override
         protected void handleAgree(ACLMessage agree) {
             System.out.println("*** LOG: " + myAgent.getLocalName() + " received AGREE from " + agree.getSender().getLocalName());
+        }
+        
+        @Override
+        protected void handleRefuse(ACLMessage refuse) {
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException ex) {
+                Logger.getLogger(ProductAgent.class.getName()).log(Level.SEVERE, null, ex);
+            }
+            
+            ACLMessage request = new ACLMessage(ACLMessage.REQUEST);
+            request.setContent(location + Constants.TOKEN + nextLocation);
+            request.addReceiver(transport);
         }
 
         @Override
@@ -153,14 +167,20 @@ public class ProductAgent extends Agent {
 
                 bestResource = bestProposer;
             } else {
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException ex) {
+                    Logger.getLogger(ProductAgent.class.getName()).log(Level.SEVERE, null, ex);
+                }
+                
                 ACLMessage cfp = new ACLMessage(ACLMessage.CFP);
                 for (Object response : responses) {
                     ACLMessage retry = (ACLMessage) response;
                     cfp.addReceiver(retry.getSender());
                     System.out.println("*** LOG: " + myAgent.getLocalName() + " sent CFP to " + retry.getSender().getLocalName());
-                    
-                    myAgent.addBehaviour(new CNInitiator(myAgent, cfp));
                 }
+                
+                myAgent.addBehaviour(new CNInitiator(myAgent, cfp));
             }
         }
 
@@ -234,7 +254,8 @@ public class ProductAgent extends Agent {
 
                 ACLMessage request = new ACLMessage(ACLMessage.REQUEST);
                 request.setContent(location + Constants.TOKEN + nextLocation);
-                request.addReceiver(transportAgents[0].getName());
+                transport = transportAgents[0].getName();
+                request.addReceiver(transport);
 
                 System.out.println("*** LOG: " + myAgent.getLocalName() + " sent REQUEST to " + transportAgents[0].getName().getLocalName());
 

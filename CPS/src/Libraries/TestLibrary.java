@@ -51,16 +51,6 @@ public class TestLibrary implements IResource {
     }
 
     @Override
-    public boolean launchProduct(String productID) {
-        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
-    }
-
-    @Override
-    public boolean finishProduct(String productID) {
-        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
-    }
-
-    @Override
     public String[] getSkills() {
         String[] skills;
         switch (myAgent.getLocalName()) {
