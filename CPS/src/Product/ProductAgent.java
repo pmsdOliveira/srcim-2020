@@ -4,7 +4,6 @@ import Utilities.Constants;
 import Utilities.DFInteraction;
 import jade.core.AID;
 import jade.core.Agent;
-import jade.core.behaviours.OneShotBehaviour;
 import jade.core.behaviours.SequentialBehaviour;
 import jade.core.behaviours.SimpleBehaviour;
 import jade.domain.FIPAAgentManagement.DFAgentDescription;
@@ -17,19 +16,15 @@ import java.util.Vector;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-/**
- *
- * @author Ricardo Silva Peres <ricardo.peres@uninova.pt>
- */
 public class ProductAgent extends Agent {
 
     String id;
     ArrayList<String> executionPlan = new ArrayList<>();
     // TO DO: Add remaining attributes required for your implementation
+    boolean negotiationDone, transportRequired, transportDone, skillDone;
     int step;
     String location, nextLocation;
     AID bestResource, transport;
-    boolean negotiationDone, transportRequired, transportDone, skillDone;
 
     @Override
     protected void setup() {
@@ -88,6 +83,8 @@ public class ProductAgent extends Agent {
         
         @Override
         protected void handleRefuse(ACLMessage refuse) {
+            System.out.println("*** LOG: " + myAgent.getLocalName() + " received REFUSE from " + refuse.getSender().getLocalName());
+            
             try {
                 Thread.sleep(1000);
             } catch (InterruptedException ex) {
@@ -97,6 +94,10 @@ public class ProductAgent extends Agent {
             ACLMessage request = new ACLMessage(ACLMessage.REQUEST);
             request.setContent(location + Constants.TOKEN + nextLocation);
             request.addReceiver(transport);
+            
+            System.out.println("*** LOG: " + myAgent.getLocalName() + " sent REQUEST to " + refuse.getSender().getLocalName());
+            
+            myAgent.addBehaviour(new REInitiatorTransport(myAgent, request));
         }
 
         @Override
@@ -166,7 +167,7 @@ public class ProductAgent extends Agent {
                 System.out.println("*** LOG: " + myAgent.getLocalName() + " sent ACCEPT-PROPOSAL to " + bestProposer.getLocalName());
 
                 bestResource = bestProposer;
-            } else {
+            } else { // no PROPOSE received
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException ex) {
@@ -200,17 +201,20 @@ public class ProductAgent extends Agent {
     }
 
     // ************************* SEARCH RESOURCES ******************************
-    private class SearchResources extends OneShotBehaviour {
+    private class SearchResources extends SimpleBehaviour {
+        
+        private boolean finished;
 
         public SearchResources(Agent a) {
             super(a);
+            this.finished = false;
         }
 
         @Override
         public void action() {
             DFAgentDescription[] resourceAgents = null;
             try {
-                System.out.println("*** LOG: " + myAgent.getLocalName() + " searching DF for agent that can execute " + executionPlan.get(step));
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " searching DF for agent that can " + executionPlan.get(step));
                 resourceAgents = DFInteraction.SearchInDFByName(executionPlan.get(step), myAgent);
             } catch (FIPAException e) {
                 System.out.println("*** LOG: " + myAgent.getLocalName() + " threw FIPAException searching DF for agents that " + executionPlan.get(step));
@@ -225,18 +229,27 @@ public class ProductAgent extends Agent {
                     System.out.println("*** LOG: " + myAgent.getLocalName() + " sent CFP to " + agent.getName().getLocalName());
                 }
 
+                this.finished = true;
                 myAgent.addBehaviour(new CNInitiator(myAgent, cfp));
             } else {
                 System.out.println("*** LOG: " + myAgent.getLocalName() + " couldn't find an agent that can " + executionPlan.get(step));
             }
         }
+        
+        @Override
+        public boolean done() {
+            return this.finished;
+        }
     }
 
     // ************************* SEARCH TRANSPORT ******************************
-    private class SearchTransport extends OneShotBehaviour {
+    private class SearchTransport extends SimpleBehaviour {
+        
+        private boolean finished;
 
         public SearchTransport(Agent a) {
             super(a);
+            this.finished = false;
         }
 
         @Override
@@ -257,12 +270,18 @@ public class ProductAgent extends Agent {
                 transport = transportAgents[0].getName();
                 request.addReceiver(transport);
 
-                System.out.println("*** LOG: " + myAgent.getLocalName() + " sent REQUEST to " + transportAgents[0].getName().getLocalName());
+                System.out.println("*** LOG: " + myAgent.getLocalName() + " sent REQUEST to " + transport.getLocalName());
 
+                this.finished = true;
                 myAgent.addBehaviour(new REInitiatorTransport(myAgent, request));
             } else {
                 System.out.println("*** LOG: " + myAgent.getLocalName() + " coudln't find transport agents");
             }
+        }
+        
+        @Override
+        public boolean done() {
+            return this.finished;
         }
     }
 
