@@ -1,6 +1,6 @@
 # SRCIM-2020
 
-# Trabalho realizado por:
+Trabalho realizado por:
 - Henrique Raposo
 - Pedro Oliveira
 - Tiago Marques
